@@ -52,6 +52,37 @@ enum class GridOption(val label: String) {
     CROSSHAIR("Center Cross")
 }
 
+enum class StabilizationMode(
+    val badge: String,
+    val fullName: String,
+    val useOis: Boolean,
+    val useEis: Boolean
+) {
+    HYBRID_OIS_EIS("OIS+EIS", "Hybrid Optical (OIS) + Electronic (EIS) Stabilization", true, true),
+    OIS_ONLY("OIS", "Optical Image Stabilization (Sensor/Lens Shift)", true, false),
+    EIS_ONLY("EIS", "Electronic Gyro-Horizon Stabilization", false, true),
+    OFF("STAB OFF", "Stabilization Off (Tripod Mode)", false, false);
+
+    val shortBadge: String get() = badge
+    val label: String get() = badge
+}
+
+enum class OptimalZoomStop(
+    val ratio: Float,
+    val label: String,
+    val focalEquivalentMm: Int,
+    val description: String
+) {
+    ULTRA_WIDE_0_6X(0.6f, "0.6x", 14, "Ultra-Wide 14mm Optic"),
+    MAIN_1X(1.0f, "1x", 24, "Primary 24mm Wide Sensor"),
+    LOSSLESS_2X(2.0f, "2x", 48, "Optimal 2x In-Sensor Lossless Zoom"),
+    PORTRAIT_3_5X(3.5f, "3.5x", 85, "Optimal 85mm Telephoto Portrait"),
+    HYBRID_5X(5.0f, "5x", 120, "5x Hybrid Optical + AI Super-Res"),
+    AI_SUPER_10X(10.0f, "10x", 240, "10x AI Multi-Frame Super-Resolution");
+
+    val focalEquivalent: String get() = "${focalEquivalentMm}mm $description"
+}
+
 enum class VideoResolutionOption(
     val label: String,
     val shortBadge: String,
@@ -98,7 +129,7 @@ enum class AiSceneProfile(
     AUTO_SCENE(
         "Auto AI Scene Recognition",
         "AI AUTO",
-        "Automatically detects scene lighting, boosts dynamic range, and optimizes color & sharpness like the default HONOR AI Camera."
+        "Automatically detects scene lighting, boosts dynamic range, and optimizes color & 4K optical zoom clarity after every capture."
     ),
     VIVID_HDR(
         "AI Vivid & Sky HDR",
@@ -209,28 +240,26 @@ data class FrameTelemetry(
     val averageLuma: Int = 128,
     val highlightClipPercent: Float = 0f,
     val shadowClipPercent: Float = 0f,
-    val dynamicRangeStopsEstimate: Float = 9.4f,
+    val dynamicRangeStopsEstimate: Float = 11.2f,
     val gridWidth: Int = 48,
     val gridHeight: Int = 36,
     val overlayCells: IntArray = IntArray(48 * 36)
 )
 
-/**
- * 100% On-Device Auto AI Imaging configuration (no external API keys or cloud uploads).
- */
 data class AiEnhanceSettings(
     val enabled: Boolean = true,
     val autoEnhanceAfterCapture: Boolean = true,
     val sceneProfile: AiSceneProfile = AiSceneProfile.AUTO_SCENE,
-    val intensityPercent: Int = 80,
+    val intensityPercent: Int = 85,
     val smartHdrToneMap: Boolean = true,
-    val detailSharpening: Boolean = true
+    val detailSharpening: Boolean = true,
+    val aiZoomSuperRes: Boolean = true
 )
 
 enum class AiJobStatus(val badgeText: String) {
     NONE("Original 4K"),
-    ENHANCING("Auto AI Tuning…"),
-    COMPLETED("AI Enhanced"),
+    ENHANCING("Auto AI ISP…"),
+    COMPLETED("AI + RAW Ready"),
     FAILED("AI Failed"),
     CANCELLED("Cancelled")
 }
@@ -239,6 +268,8 @@ data class CapturedMediaItem(
     val id: String,
     val originalUriString: String,
     val enhancedUriString: String? = null,
+    val rawDngUriString: String? = null,
+    val rawDngFileName: String? = null,
     val displayName: String,
     val isVideo: Boolean = false,
     val timestampMs: Long,
@@ -251,7 +282,7 @@ data class CapturedMediaItem(
     val aiStatus: AiJobStatus = AiJobStatus.NONE,
     val aiSceneSummary: String? = null,
     val aiErrorMessage: String? = null,
-    val showingEnhancedInGallery: Boolean = false
+    val showingEnhancedInGallery: Boolean = true
 )
 
 data class CameraPreset(
@@ -281,9 +312,9 @@ enum class ThermalHealthLevel(
     val detail: String,
     val throttlesHeavyFeatures: Boolean
 ) {
-    NOMINAL("Nominal (Cool)", "Full 4K/60, 4K Photo & On-Device Auto AI active.", false),
+    NOMINAL("Nominal (Cool)", "Camera2 HAL Bypass, 4K/60, RAW DNG, OIS+EIS & Auto AI active.", false),
     LIGHT("Light Warmth", "Normal operating temperature.", false),
-    MODERATE("Warm", "Monitoring sensor heat; 4K/60 & 4K/30 available.", false),
-    SEVERE("Hot — Throttling", "Frame analysis throttled & 60fps switched to 30fps to cool device.", true),
-    CRITICAL("Critical Heat", "High-power 4K & live overlays paused to protect hardware.", true)
+    MODERATE("Warm", "Monitoring sensor heat; 4K/60, RAW & OIS+EIS active.", false),
+    SEVERE("Hot — Throttling", "Frame analysis throttled to cool device.", true),
+    CRITICAL("Critical Heat", "High-power live overlays paused to protect hardware.", true)
 }

@@ -317,26 +317,23 @@ fun CameraViewfinderStage(
                 )
             }
 
-            if (lens?.supportsOpticalStabilization == true) {
-                optsBuilder.setCaptureRequestOption(
-                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
-                    if (uiState.stabilizationEnabled) {
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
-                    } else {
-                        CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
-                    }
-                )
-            }
-            if (lens?.supportsVideoStabilization == true) {
-                optsBuilder.setCaptureRequestOption(
-                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
-                    if (uiState.stabilizationEnabled) {
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
-                    } else {
-                        CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-                    }
-                )
-            }
+            // Apply Hybrid OIS + EIS Stabilization via Camera2Interop + HAL Bypass
+            optsBuilder.setCaptureRequestOption(
+                CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE,
+                if (uiState.stabilizationMode.useOis) {
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_ON
+                } else {
+                    CaptureRequest.LENS_OPTICAL_STABILIZATION_MODE_OFF
+                }
+            )
+            optsBuilder.setCaptureRequestOption(
+                CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
+                if (uiState.stabilizationMode.useEis) {
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_ON
+                } else {
+                    CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE_OFF
+                }
+            )
 
             camera2Control.setCaptureRequestOptions(optsBuilder.build())
         } catch (_: Exception) {
@@ -366,10 +363,8 @@ fun CameraViewfinderStage(
                     },
                     onDragEnd = {
                         if (abs(cumulativeDragX) > abs(cumulativeDragY) && abs(cumulativeDragX) > 72f) {
-                            // Horizontal swipe changes mode
                             if (cumulativeDragX < 0) onSwipeMode(1) else onSwipeMode(-1)
                         } else if (abs(cumulativeDragY) > abs(cumulativeDragX) && abs(cumulativeDragY) > 72f) {
-                            // Vertical swipe flips front/rear camera
                             onFlipCamera()
                         }
                     },
@@ -409,7 +404,6 @@ fun CameraViewfinderStage(
                 .clip(RoundedCornerShape(18.dp))
                 .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(18.dp))
         ) {
-            // Optical studio reference backdrop (visible in headless emulators or while camera initializes)
             Image(
                 painter = painterResource(id = R.drawable.img_optics_studio_banner_1793975946933),
                 contentDescription = "Camera optical viewfinder scene",
@@ -424,11 +418,52 @@ fun CameraViewfinderStage(
                 )
             }
 
-            // Real-time Viewfinder Overlays (Grid, Horizon Level, Focus Reticle, Single Active Pro Overlay)
             ViewfinderGraphicsOverlay(
                 uiState = uiState,
                 modifier = Modifier.fillMaxSize()
             )
+
+            // Live Top-Left Telemetry Badge: HAL Bypass • RAW DNG • OIS+EIS • Optimal Zoom
+            Surface(
+                color = Color(0xCC0D111A),
+                shape = RoundedCornerShape(10.dp),
+                border = androidx.compose.foundation.BorderStroke(1.dp, CyanAiSecondary.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(top = 64.dp, start = 12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (uiState.halBypassEnabled) "HAL BYPASS" else "STD HAL",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = EmeraldOptimal
+                    )
+                    Text("•", style = MaterialTheme.typography.labelSmall, color = SilverTextSecondary)
+                    Text(
+                        text = uiState.stabilizationMode.badge,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = AmberOpticPrimary
+                    )
+                    if (uiState.rawCaptureEnabled && !uiState.currentMode.isVideoMode) {
+                        Text("•", style = MaterialTheme.typography.labelSmall, color = SilverTextSecondary)
+                        Text(
+                            text = "RAW DNG",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = CyanAiSecondary
+                        )
+                    }
+                    Text("•", style = MaterialTheme.typography.labelSmall, color = SilverTextSecondary)
+                    Text(
+                        text = String.format(java.util.Locale.US, "%.1fx", uiState.zoomRatio),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = IvoryTextPrimary
+                    )
+                }
+            }
 
             // Shutter Flash Effect
             AnimatedVisibility(

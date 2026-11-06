@@ -205,6 +205,8 @@ fun LuminaCameraAppScreen(viewModel: CameraViewModel) {
                             viewModel.toggle4kFpsOrPhotoRatio()
                         },
                         onOpenSheet = { sheet -> viewModel.openSheet(sheet) },
+                        onToggleRaw = { viewModel.toggleRawCapture() },
+                        onCycleStabilization = { viewModel.cycleStabilizationMode() },
                         modifier = Modifier.align(Alignment.TopCenter)
                     )
 
@@ -313,6 +315,7 @@ fun LuminaCameraAppScreen(viewModel: CameraViewModel) {
                     uiState = uiState,
                     onSelectLensIndex = { idx -> viewModel.selectLensIndex(idx) },
                     onSetZoomRatio = { z -> viewModel.setZoomRatio(z) },
+                    onSelectOptimalZoomStop = { stop -> viewModel.selectOptimalZoomStop(stop) },
                     onSelectMode = { mode -> viewModel.selectMode(mode) },
                     onShutterTap = {
                         viewModel.triggerShutter(
@@ -357,6 +360,9 @@ fun LuminaCameraAppScreen(viewModel: CameraViewModel) {
                         onSetVideoFps = { viewModel.setVideoFps(it) },
                         onToggleHdr = { viewModel.toggleHdr(it) },
                         onToggleStabilization = { viewModel.toggleStabilization(it) },
+                        onSetStabilizationMode = { viewModel.setStabilizationMode(it) },
+                        onToggleHalBypass = { viewModel.toggleHalBypass(it) },
+                        onToggleRawCapture = { viewModel.toggleRawCapture(it) },
                         onSetGridOption = { viewModel.setGridOption(it) },
                         onToggleHorizonLevel = { viewModel.toggleHorizonLevel(it) },
                         onToggleAudio = { viewModel.toggleAudioRecording(it) },

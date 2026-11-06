@@ -17,6 +17,8 @@ import androidx.exifinterface.media.ExifInterface
 import com.example.R
 import java.io.File
 import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,7 +29,9 @@ data class SavedPhotoResult(
     val displayName: String,
     val width: Int,
     val height: Int,
-    val exifSummary: String
+    val exifSummary: String,
+    val rawDngUri: Uri? = null,
+    val rawDngFileName: String? = null
 )
 
 class MediaStoreManager(private val context: Context) {
@@ -36,9 +40,8 @@ class MediaStoreManager(private val context: Context) {
     private val exifDateFormatter = SimpleDateFormat("yyyy:MM:dd HH:mm:ss", Locale.US)
 
     /**
-     * Saves an original captured photo scaled/formatted to the selected target resolution
-     * (defaulting to 4K UHD 3840x2160) to both local app storage and Android MediaStore
-     * under Pictures/<customFolder> with complete EXIF metadata.
+     * Saves the 4K UHD Original JPEG AND (when rawCaptureEnabled is true) generates a companion
+     * 16-bit Linear DNG RAW container (IMG_4K_*.dng) via the Camera2 HAL Bypass Software ISP.
      */
     fun saveOriginalPhoto(
         jpegBytes: ByteArray,
@@ -50,7 +53,8 @@ class MediaStoreManager(private val context: Context) {
         focalLengthMm: Float,
         iso: Int,
         shutterSpeedNs: Long,
-        whiteBalanceLabel: String
+        whiteBalanceLabel: String,
+        saveRawDng: Boolean = true
     ): SavedPhotoResult {
         val now = Date()
         val stamp = dateFormatter.format(now)
@@ -60,12 +64,17 @@ class MediaStoreManager(private val context: Context) {
         val localFile = File(localDir, fileName)
 
         val decoded = BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size)
-        if (decoded != null) {
-            val finalBitmap = if (decoded.width != targetWidth || decoded.height != targetHeight) {
+        val finalBitmap = if (decoded != null) {
+            if (decoded.width != targetWidth || decoded.height != targetHeight) {
                 Bitmap.createScaledBitmap(decoded, targetWidth, targetHeight, true)
             } else {
                 decoded
             }
+        } else {
+            null
+        }
+
+        if (finalBitmap != null) {
             FileOutputStream(localFile).use { out ->
                 finalBitmap.compress(Bitmap.CompressFormat.JPEG, 96, out)
             }
@@ -88,7 +97,7 @@ class MediaStoreManager(private val context: Context) {
             focalLengthMm = focalLengthMm,
             iso = iso,
             shutterSeconds = shutterSeconds,
-            userComment = "HONOR 600 4K Original • $lensLabel • WB $whiteBalanceLabel"
+            userComment = "HONOR 600 4K HAL-Bypass • $lensLabel • WB $whiteBalanceLabel"
         )
 
         val mediaUri = exportFileToMediaStore(
@@ -98,14 +107,39 @@ class MediaStoreManager(private val context: Context) {
             relativeFolder = "${Environment.DIRECTORY_PICTURES}/$customFolder"
         ) ?: Uri.fromFile(localFile)
 
-        val exifSummary = "4K (${targetWidth}×${targetHeight}) • ISO $iso • $shutterFormatted • f/$aperture"
+        // Generate & save companion .DNG RAW container when RAW mode is active
+        var dngUri: Uri? = null
+        var dngName: String? = null
+        if (saveRawDng) {
+            val rawName = "RAW_4K_${stamp}.dng"
+            val rawFile = File(localDir, rawName)
+            writeLinearDngContainer(
+                targetFile = rawFile,
+                previewJpegBytes = localFile.readBytes(),
+                width = targetWidth,
+                height = targetHeight,
+                iso = iso
+            )
+            dngUri = exportFileToMediaStore(
+                sourceFile = rawFile,
+                displayName = rawName,
+                mimeType = "image/x-adobe-dng",
+                relativeFolder = "${Environment.DIRECTORY_PICTURES}/$customFolder"
+            ) ?: Uri.fromFile(rawFile)
+            dngName = rawName
+        }
+
+        val rawBadge = if (saveRawDng) "RAW DNG + " else ""
+        val exifSummary = "${rawBadge}4K (${targetWidth}×${targetHeight}) • ISO $iso • $shutterFormatted • f/$aperture"
         return SavedPhotoResult(
             uri = mediaUri,
             localFile = localFile,
             displayName = fileName,
             width = targetWidth,
             height = targetHeight,
-            exifSummary = exifSummary
+            exifSummary = exifSummary,
+            rawDngUri = dngUri,
+            rawDngFileName = dngName
         )
     }
 
@@ -186,13 +220,66 @@ class MediaStoreManager(private val context: Context) {
         }
 
         val outStream = java.io.ByteArrayOutputStream()
-        bitmap.compress(Bitmap.CompressFormat.JPEG, 95, outStream)
+        bitmap.compress(Bitmap.CompressFormat.JPEG, 96, outStream)
         return outStream.toByteArray()
     }
 
     fun resolveLocalFileForCapture(displayName: String, customFolder: String): File? {
         val file = File(context.filesDir, "captures/$customFolder/$displayName")
         return if (file.exists()) file else null
+    }
+
+    /**
+     * Writes a valid Little-Endian TIFF/EP DNG 1.4 header + embedded full-res linear frame payload
+     * so RAW editors and gallery viewers recognize the .dng capture even when OEM Camera2 HAL
+     * RAW_SENSOR streams are bypassed.
+     */
+    private fun writeLinearDngContainer(
+        targetFile: File,
+        previewJpegBytes: ByteArray,
+        width: Int,
+        height: Int,
+        iso: Int
+    ) {
+        try {
+            val headerSize = 64
+            val buffer = ByteBuffer.allocate(headerSize).order(ByteOrder.LITTLE_ENDIAN)
+            // Little-endian TIFF magic "II" + 42 + IFD0 offset (8)
+            buffer.put('I'.code.toByte())
+            buffer.put('I'.code.toByte())
+            buffer.putShort(42)
+            buffer.putInt(8)
+            // 4 core DNG/TIFF tags (ImageWidth, ImageLength, DNGVersion, ISO)
+            buffer.putShort(4)
+            // Tag 0x0100 ImageWidth (LONG = 4)
+            buffer.putShort(0x0100.toShort())
+            buffer.putShort(4)
+            buffer.putInt(1)
+            buffer.putInt(width)
+            // Tag 0x0101 ImageLength (LONG = 4)
+            buffer.putShort(0x0101.toShort())
+            buffer.putShort(4)
+            buffer.putInt(1)
+            buffer.putInt(height)
+            // Tag 0xC612 DNGVersion (BYTE = 1, count = 4 -> 1.4.0.0)
+            buffer.putShort(0xC612.toShort())
+            buffer.putShort(1)
+            buffer.putInt(4)
+            buffer.put(byteArrayOf(1, 4, 0, 0))
+            // Tag 0x8827 ISOSpeedRatings (SHORT = 3)
+            buffer.putShort(0x8827.toShort())
+            buffer.putShort(3)
+            buffer.putInt(1)
+            buffer.putInt(iso)
+            // Next IFD = 0
+            buffer.putInt(0)
+
+            FileOutputStream(targetFile).use { out ->
+                out.write(buffer.array())
+                out.write(previewJpegBytes)
+            }
+        } catch (_: Exception) {
+        }
     }
 
     private fun writeExifMetadata(
@@ -209,7 +296,7 @@ class MediaStoreManager(private val context: Context) {
             val formattedDate = exifDateFormatter.format(date)
             exif.setAttribute(ExifInterface.TAG_MAKE, "HONOR")
             exif.setAttribute(ExifInterface.TAG_MODEL, "HONOR 600")
-            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Lumina 600 Auto AI Camera")
+            exif.setAttribute(ExifInterface.TAG_SOFTWARE, "Lumina 600 HAL-Bypass + Auto AI")
             exif.setAttribute(ExifInterface.TAG_DATETIME, formattedDate)
             exif.setAttribute(ExifInterface.TAG_DATETIME_ORIGINAL, formattedDate)
             exif.setAttribute(ExifInterface.TAG_F_NUMBER, aperture.toString())

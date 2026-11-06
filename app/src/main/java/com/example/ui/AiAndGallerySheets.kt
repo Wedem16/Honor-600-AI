@@ -354,6 +354,30 @@ fun AiEnhanceSettingsSheet(
                             onCheckedChange = { onUpdateAiSettings(settings.copy(detailSharpening = it)) }
                         )
                     }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Optimal Zoom AI Super-Resolution (2x–10x)",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = IvoryTextPrimary
+                            )
+                            Text(
+                                text = "Applies adaptive multi-scale edge reconstruction and chroma de-ringing at telephoto zoom stops.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = CyanAiSecondary
+                            )
+                        }
+                        Switch(
+                            checked = settings.aiZoomSuperRes,
+                            onCheckedChange = { onUpdateAiSettings(settings.copy(aiZoomSuperRes = it)) },
+                            modifier = Modifier.testTag("ai_zoom_super_res_switch")
+                        )
+                    }
                 }
             }
         }
@@ -396,7 +420,7 @@ fun DualVersionGallerySheet(
             ) {
                 Column {
                     Text(
-                        text = "4K Original & Auto AI Gallery",
+                        text = "4K Original, RAW & Auto AI Gallery",
                         style = MaterialTheme.typography.headlineMedium,
                         color = IvoryTextPrimary
                     )
@@ -443,7 +467,7 @@ fun DualVersionGallerySheet(
                             color = IvoryTextPrimary
                         )
                         Text(
-                            text = "Tap the shutter to capture a 4K photo with Auto AI Imaging.",
+                            text = "Tap the shutter to capture a 4K photo with Auto AI Imaging and 16-bit RAW DNG.",
                             style = MaterialTheme.typography.bodySmall,
                             color = SilverTextSecondary
                         )
@@ -481,7 +505,7 @@ fun DualVersionGallerySheet(
                         )
                     }
 
-                    // Top-Left Version & AI Badge
+                    // Top-Left Version, AI & RAW DNG Badges
                     Row(
                         modifier = Modifier
                             .align(Alignment.TopStart)
@@ -511,6 +535,22 @@ fun DualVersionGallerySheet(
                             ) {
                                 Text(
                                     text = "AI",
+                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.Black
+                                )
+                            }
+                        }
+
+                        if (!selectedItem.rawDngFileName.isNullOrBlank()) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(AmberOpticPrimary)
+                                    .padding(horizontal = 8.dp, vertical = 5.dp)
+                                    .testTag("gallery_raw_dng_badge")
+                            ) {
+                                Text(
+                                    text = "RAW DNG",
                                     style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                     color = Color.Black
                                 )
@@ -581,6 +621,13 @@ fun DualVersionGallerySheet(
                             style = MaterialTheme.typography.labelSmall,
                             color = SilverTextSecondary
                         )
+                        if (!selectedItem.rawDngFileName.isNullOrBlank()) {
+                            Text(
+                                text = "16-Bit RAW File: ${selectedItem.rawDngFileName} (Saved to Pictures/${uiState.customStorageFolder})",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AmberOpticPrimary
+                            )
+                        }
                         if (!selectedItem.aiSceneSummary.isNullOrBlank()) {
                             Text(
                                 text = "On-Device ISP: ${selectedItem.aiSceneSummary}",

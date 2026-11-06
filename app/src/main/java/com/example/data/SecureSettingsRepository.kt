@@ -11,6 +11,7 @@ import com.example.model.CameraPreset
 import com.example.model.CapturedMediaItem
 import com.example.model.GridOption
 import com.example.model.ProOverlayType
+import com.example.model.StabilizationMode
 import com.example.model.VideoFpsOption
 import com.example.model.VideoResolutionOption
 import com.example.model.WhiteBalancePreset
@@ -32,9 +33,10 @@ class SecureSettingsRepository(context: Context) {
             enabled = appPrefs.getBoolean(KEY_AI_ENABLED, true),
             autoEnhanceAfterCapture = appPrefs.getBoolean(KEY_AI_AUTO, true),
             sceneProfile = profile,
-            intensityPercent = appPrefs.getInt(KEY_AI_INTENSITY, 80),
+            intensityPercent = appPrefs.getInt(KEY_AI_INTENSITY, 85),
             smartHdrToneMap = appPrefs.getBoolean(KEY_AI_HDR_TONEMAP, true),
-            detailSharpening = appPrefs.getBoolean(KEY_AI_SHARPEN, true)
+            detailSharpening = appPrefs.getBoolean(KEY_AI_SHARPEN, true),
+            aiZoomSuperRes = appPrefs.getBoolean(KEY_AI_ZOOM_SUPERRES, true)
         )
     }
 
@@ -46,7 +48,31 @@ class SecureSettingsRepository(context: Context) {
             .putInt(KEY_AI_INTENSITY, settings.intensityPercent)
             .putBoolean(KEY_AI_HDR_TONEMAP, settings.smartHdrToneMap)
             .putBoolean(KEY_AI_SHARPEN, settings.detailSharpening)
+            .putBoolean(KEY_AI_ZOOM_SUPERRES, settings.aiZoomSuperRes)
             .apply()
+    }
+
+    fun isHalBypassEnabled(): Boolean = appPrefs.getBoolean(KEY_HAL_BYPASS, true)
+
+    fun setHalBypassEnabled(enabled: Boolean) {
+        appPrefs.edit().putBoolean(KEY_HAL_BYPASS, enabled).apply()
+    }
+
+    fun isRawCaptureEnabled(): Boolean = appPrefs.getBoolean(KEY_RAW_DNG_ENABLED, true)
+
+    fun setRawCaptureEnabled(enabled: Boolean) {
+        appPrefs.edit().putBoolean(KEY_RAW_DNG_ENABLED, enabled).apply()
+    }
+
+    fun getStabilizationMode(): StabilizationMode {
+        val name = appPrefs.getString(KEY_STABILIZATION_MODE, StabilizationMode.HYBRID_OIS_EIS.name)
+            ?: StabilizationMode.HYBRID_OIS_EIS.name
+        return runCatching { StabilizationMode.valueOf(name) }
+            .getOrDefault(StabilizationMode.HYBRID_OIS_EIS)
+    }
+
+    fun setStabilizationMode(mode: StabilizationMode) {
+        appPrefs.edit().putString(KEY_STABILIZATION_MODE, mode.name).apply()
     }
 
     fun getCustomStorageFolder(): String {
@@ -149,6 +175,8 @@ class SecureSettingsRepository(context: Context) {
                         id = obj.getString("id"),
                         originalUriString = obj.getString("originalUriString"),
                         enhancedUriString = obj.optString("enhancedUriString", "").ifBlank { null },
+                        rawDngUriString = obj.optString("rawDngUriString", "").ifBlank { null },
+                        rawDngFileName = obj.optString("rawDngFileName", "").ifBlank { null },
                         displayName = obj.optString("displayName", "IMG_${i + 1}.jpg"),
                         isVideo = obj.optBoolean("isVideo", false),
                         timestampMs = obj.optLong("timestampMs", System.currentTimeMillis()),
@@ -156,13 +184,13 @@ class SecureSettingsRepository(context: Context) {
                         height = obj.optInt("height", 2160),
                         lensLabel = obj.optString("lensLabel", "1x Wide"),
                         modeLabel = obj.optString("modeLabel", "PHOTO 4K"),
-                        exifSummary = obj.optString("exifSummary", "4K UHD • ISO 100 • 1/125s"),
+                        exifSummary = obj.optString("exifSummary", "RAW DNG + 4K UHD • ISO 100"),
                         customFolder = obj.optString("customFolder", "Lumina600"),
                         aiStatus = runCatching { AiJobStatus.valueOf(obj.optString("aiStatus")) }
                             .getOrDefault(AiJobStatus.NONE),
                         aiSceneSummary = obj.optString("aiSceneSummary", "").ifBlank { null },
                         aiErrorMessage = obj.optString("aiErrorMessage", "").ifBlank { null },
-                        showingEnhancedInGallery = obj.optBoolean("showingEnhancedInGallery", false)
+                        showingEnhancedInGallery = obj.optBoolean("showingEnhancedInGallery", true)
                     )
                 )
             }
@@ -179,6 +207,8 @@ class SecureSettingsRepository(context: Context) {
                 put("id", item.id)
                 put("originalUriString", item.originalUriString)
                 put("enhancedUriString", item.enhancedUriString ?: "")
+                put("rawDngUriString", item.rawDngUriString ?: "")
+                put("rawDngFileName", item.rawDngFileName ?: "")
                 put("displayName", item.displayName)
                 put("isVideo", item.isVideo)
                 put("timestampMs", item.timestampMs)
@@ -203,7 +233,7 @@ class SecureSettingsRepository(context: Context) {
         return listOf(
             CameraPreset(
                 id = "preset_4k60_action",
-                name = "4K 60fps Action + OIS",
+                name = "4K 60fps Hybrid OIS+EIS",
                 createdAtMs = now - 86_400_000L,
                 mode = CameraMode.VIDEO,
                 aspectRatio = AspectRatioOption.RATIO_16_9,
@@ -223,30 +253,9 @@ class SecureSettingsRepository(context: Context) {
                 activeOverlay = ProOverlayType.NONE
             ),
             CameraPreset(
-                id = "preset_4k30_cinema",
-                name = "4K 30fps Cinema Pro + Zebra",
+                id = "preset_raw_4k_pro",
+                name = "RAW DNG + 4K Auto AI Master",
                 createdAtMs = now - 43_200_000L,
-                mode = CameraMode.PRO_VIDEO,
-                aspectRatio = AspectRatioOption.RATIO_16_9,
-                videoResolution = VideoResolutionOption.UHD_4K,
-                videoFps = VideoFpsOption.FPS_30,
-                hdrEnabled = true,
-                stabilizationEnabled = true,
-                gridOption = GridOption.GOLDEN_RATIO,
-                horizonLevelEnabled = true,
-                customFolder = "LuminaCinema",
-                proIso = 100,
-                proShutterNs = 16_666_666L, // 1/60s
-                proWbPreset = WhiteBalancePreset.DAYLIGHT,
-                proFocusDiopters = null,
-                proExposureComp = 0,
-                showHistogram = true,
-                activeOverlay = ProOverlayType.ZEBRA
-            ),
-            CameraPreset(
-                id = "preset_4k_photo_pro",
-                name = "4K Photo + Peaking",
-                createdAtMs = now - 12_000_000L,
                 mode = CameraMode.PRO_PHOTO,
                 aspectRatio = AspectRatioOption.RATIO_16_9,
                 videoResolution = VideoResolutionOption.UHD_4K,
@@ -255,7 +264,7 @@ class SecureSettingsRepository(context: Context) {
                 stabilizationEnabled = true,
                 gridOption = GridOption.RULE_OF_THIRDS,
                 horizonLevelEnabled = true,
-                customFolder = "Lumina600",
+                customFolder = "LuminaRAW",
                 proIso = 100,
                 proShutterNs = 4_000_000L,
                 proWbPreset = WhiteBalancePreset.DAYLIGHT,
@@ -274,8 +283,12 @@ class SecureSettingsRepository(context: Context) {
         private const val KEY_AI_INTENSITY = "ai_ondevice_intensity"
         private const val KEY_AI_HDR_TONEMAP = "ai_ondevice_hdr"
         private const val KEY_AI_SHARPEN = "ai_ondevice_sharpen"
+        private const val KEY_AI_ZOOM_SUPERRES = "ai_ondevice_zoom_superres"
+        private const val KEY_HAL_BYPASS = "camera2_hal_bypass_enabled"
+        private const val KEY_RAW_DNG_ENABLED = "raw_dng_capture_enabled"
+        private const val KEY_STABILIZATION_MODE = "stabilization_mode_v2"
         private const val KEY_CUSTOM_FOLDER = "custom_storage_folder"
-        private const val KEY_PRESETS_JSON = "camera_presets_v2_json"
-        private const val KEY_MEDIA_HISTORY_JSON = "captured_media_history_v2_json"
+        private const val KEY_PRESETS_JSON = "camera_presets_v3_json"
+        private const val KEY_MEDIA_HISTORY_JSON = "captured_media_history_v3_json"
     }
 }

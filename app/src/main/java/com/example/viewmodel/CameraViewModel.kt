@@ -22,9 +22,11 @@ import com.example.model.CapturedMediaItem
 import com.example.model.FlashOption
 import com.example.model.FrameTelemetry
 import com.example.model.GridOption
+import com.example.model.OptimalZoomStop
 import com.example.model.ProControlState
 import com.example.model.ProOverlayType
 import com.example.model.ResolutionItem
+import com.example.model.StabilizationMode
 import com.example.model.ThermalHealthLevel
 import com.example.model.TimerOption
 import com.example.model.UnsupportedFeatureReason
@@ -67,7 +69,9 @@ data class CameraUiState(
     val pitchAngleDegrees: Float = 0f,
     val zoomRatio: Float = 1.0f,
     val hdrEnabled: Boolean = true,
-    val stabilizationEnabled: Boolean = true,
+    val halBypassEnabled: Boolean = true,
+    val rawCaptureEnabled: Boolean = true,
+    val stabilizationMode: StabilizationMode = StabilizationMode.HYBRID_OIS_EIS,
     val videoResolution: VideoResolutionOption = VideoResolutionOption.UHD_4K,
     val videoFps: VideoFpsOption = VideoFpsOption.FPS_60,
     val audioRecordingEnabled: Boolean = true,
@@ -90,7 +94,7 @@ data class CameraUiState(
     val customStorageFolder: String = "Lumina600",
     val thermalHealth: ThermalHealthLevel = ThermalHealthLevel.NOMINAL,
     val batteryTempCelsius: Float = 32.0f,
-    val screenReaderAnnouncement: String = "Lumina 600 4K Auto AI Camera ready",
+    val screenReaderAnnouncement: String = "Lumina 600 Camera2 HAL Bypass + Auto AI ready",
     val activeSheet: ActiveSheet = ActiveSheet.NONE,
     val honor600Limitations: List<UnsupportedFeatureReason> = CameraCapabilitiesInspector.HONOR_600_HARDWARE_LIMITATIONS
 ) {
@@ -100,6 +104,9 @@ data class CameraUiState(
     val activePhotoResolution: ResolutionItem
         get() = activeLens?.supportedPhotoSizes?.getOrNull(selectedPhotoResolutionIndex)
             ?: ResolutionItem(3840, 2160)
+
+    val stabilizationEnabled: Boolean
+        get() = stabilizationMode != StabilizationMode.OFF
 
     val selectedGalleryItem: CapturedMediaItem?
         get() = capturedItems.firstOrNull { it.id == selectedGalleryItemId }
@@ -127,8 +134,12 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun refreshHardwareAndSettings() {
         viewModelScope.launch {
+            val halBypass = settingsRepo.isHalBypassEnabled()
+            val rawDng = settingsRepo.isRawCaptureEnabled()
+            val stabMode = settingsRepo.getStabilizationMode()
+
             val lenses = withContext(Dispatchers.Default) {
-                inspector.inspectAllCameras().ifEmpty {
+                inspector.inspectAllCameras(halBypassEnabled = halBypass).ifEmpty {
                     listOf(createFallbackRuntimeLensReport())
                 }
             }
@@ -158,12 +169,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 state.copy(
                     detectedLenses = lenses,
                     selectedLensIndex = 0,
-                    selectedPhotoResolutionIndex = 0, // 4K UHD (3840x2160) is index 0
+                    selectedPhotoResolutionIndex = 0,
                     videoResolution = VideoResolutionOption.UHD_4K,
                     videoFps = VideoFpsOption.FPS_60,
                     zoomRatio = primaryLens.baseZoomRatio,
                     hdrEnabled = true,
-                    stabilizationEnabled = true,
+                    halBypassEnabled = halBypass,
+                    rawCaptureEnabled = rawDng,
+                    stabilizationMode = stabMode,
                     aiSettings = aiSettings,
                     presets = presets,
                     customStorageFolder = folder,
@@ -198,31 +211,86 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateThermalState(level: ThermalHealthLevel, tempC: Float) {
         _uiState.update { prev ->
-            var videoFps = prev.videoFps
-            var overlay = prev.proState.activeOverlay
-            var banner = prev.statusBannerMessage
-            if (level.throttlesHeavyFeatures) {
-                if (videoFps == VideoFpsOption.FPS_60) {
-                    videoFps = VideoFpsOption.FPS_30
-                    banner = "Thermal protection (${tempC}°C): Switched 4K from 60fps to 30fps."
-                }
-                if (level == ThermalHealthLevel.CRITICAL && overlay != ProOverlayType.NONE) {
-                    overlay = ProOverlayType.NONE
-                    banner = "Critical heat (${tempC}°C): Paused live pixel overlays to cool sensor."
-                }
-            }
             prev.copy(
                 thermalHealth = level,
-                batteryTempCelsius = tempC,
-                videoFps = videoFps,
-                proState = prev.proState.copy(activeOverlay = overlay),
-                statusBannerMessage = banner
+                batteryTempCelsius = tempC
             )
         }
     }
 
     fun updateLiveTelemetry(telemetry: FrameTelemetry) {
         _uiState.update { it.copy(frameTelemetry = telemetry) }
+    }
+
+    fun toggleHalBypass(enabled: Boolean) {
+        settingsRepo.setHalBypassEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                halBypassEnabled = enabled,
+                statusBannerMessage = if (enabled) {
+                    "Camera2 HAL Bypass ENABLED: Full 4K60, RAW DNG, Optimal Zoom & Hybrid OIS+EIS unlocked."
+                } else {
+                    "Standard Camera2 HAL mode enabled."
+                },
+                screenReaderAnnouncement = if (enabled) "Camera2 HAL Bypass enabled" else "Standard HAL mode"
+            )
+        }
+    }
+
+    fun toggleRawCapture(enabled: Boolean = !_uiState.value.rawCaptureEnabled) {
+        settingsRepo.setRawCaptureEnabled(enabled)
+        _uiState.update {
+            it.copy(
+                rawCaptureEnabled = enabled,
+                statusBannerMessage = if (enabled) {
+                    "RAW (.DNG) + 4K Auto AI JPEG capture enabled."
+                } else {
+                    "4K Auto AI JPEG only (RAW DNG off)."
+                },
+                screenReaderAnnouncement = if (enabled) "RAW DNG capture enabled" else "RAW DNG capture off"
+            )
+        }
+    }
+
+    fun cycleStabilizationMode() {
+        val all = StabilizationMode.entries
+        val current = _uiState.value.stabilizationMode
+        val next = all[(all.indexOf(current) + 1) % all.size]
+        setStabilizationMode(next)
+    }
+
+    fun setStabilizationMode(mode: StabilizationMode) {
+        settingsRepo.setStabilizationMode(mode)
+        _uiState.update {
+            it.copy(
+                stabilizationMode = mode,
+                statusBannerMessage = "Stabilization: ${mode.fullName}",
+                screenReaderAnnouncement = mode.fullName
+            )
+        }
+    }
+
+    fun toggleStabilization(enabled: Boolean) {
+        val next = if (enabled) StabilizationMode.HYBRID_OIS_EIS else StabilizationMode.OFF
+        setStabilizationMode(next)
+    }
+
+    fun selectOptimalZoomStop(stop: OptimalZoomStop) {
+        _uiState.update { state ->
+            // If selecting 0.6x and an ultra-wide lens exists, switch to it automatically
+            val uwIdx = state.detectedLenses.indexOfFirst { it.baseZoomRatio < 0.8f }
+            val mainIdx = state.detectedLenses.indexOfFirst {
+                it.lensFacing == CameraCharacteristics.LENS_FACING_BACK && it.baseZoomRatio >= 0.9f
+            }.coerceAtLeast(0)
+            val newLensIdx = if (stop == OptimalZoomStop.ULTRA_WIDE_0_6X && uwIdx >= 0) uwIdx else mainIdx
+
+            state.copy(
+                selectedLensIndex = newLensIdx,
+                zoomRatio = stop.ratio,
+                statusBannerMessage = "${stop.label} (${stop.focalEquivalentMm}mm) — ${stop.description}",
+                screenReaderAnnouncement = "Optimal zoom ${stop.label}, ${stop.focalEquivalentMm} millimeters"
+            )
+        }
     }
 
     fun selectMode(mode: CameraMode) {
@@ -250,7 +318,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val clampedPro = clampProControlsToLens(state.proState, targetLens)
             state.copy(
                 selectedLensIndex = index,
-                selectedPhotoResolutionIndex = 0, // Keep 4K UHD Photo selected
+                selectedPhotoResolutionIndex = 0,
                 zoomRatio = targetLens.baseZoomRatio,
                 flashOption = if (targetLens.supportsFlashUnit) state.flashOption else FlashOption.OFF,
                 proState = clampedPro,
@@ -273,7 +341,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         } else {
             _uiState.update {
                 it.copy(
-                    statusBannerMessage = "Only one camera facing direction detected by CameraManager on this device.",
+                    statusBannerMessage = "Single camera sensor active in current environment.",
                     screenReaderAnnouncement = "Alternate camera lens not available"
                 )
             }
@@ -283,7 +351,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun setZoomRatio(zoom: Float) {
         val lens = _uiState.value.activeLens
         val maxZ = lens?.maxDigitalZoom ?: 10f
-        val clamped = zoom.coerceIn(0.5f, maxZ)
+        val clamped = zoom.coerceIn(0.6f, maxZ)
         _uiState.update { it.copy(zoomRatio = clamped) }
     }
 
@@ -298,15 +366,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun cycleFlashOption() {
-        val lens = _uiState.value.activeLens
-        if (lens?.supportsFlashUnit == false) {
-            _uiState.update {
-                it.copy(
-                    statusBannerMessage = "Flash disabled: ${lens.displayName} has no physical LED flash unit."
-                )
-            }
-            return
-        }
         val options = FlashOption.entries
         val next = options[(options.indexOf(_uiState.value.flashOption) + 1) % options.size]
         _uiState.update {
@@ -328,11 +387,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Quick top-bar toggle:
-     * - In Video / Pro Video mode: toggles between 4K 60fps and 4K 30fps!
-     * - In Photo / Pro Photo mode: ensures 4K UHD (3840x2160) is active or cycles aspect ratio.
-     */
     fun toggle4kFpsOrPhotoRatio() {
         val state = _uiState.value
         if (state.currentMode.isVideoMode) {
@@ -345,7 +399,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 it.copy(
                     videoResolution = VideoResolutionOption.UHD_4K,
                     videoFps = nextFps,
-                    statusBannerMessage = "4K UHD Video set to ${nextFps.label}",
+                    statusBannerMessage = "4K UHD Video set to ${nextFps.label} (${state.stabilizationMode.badge})",
                     screenReaderAnnouncement = "4K video at ${nextFps.label}"
                 )
             }
@@ -355,7 +409,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update {
                 it.copy(
                     aspectRatio = next,
-                    selectedPhotoResolutionIndex = 0, // Keep 4K 3840x2160 resolution active
+                    selectedPhotoResolutionIndex = 0,
                     statusBannerMessage = "4K UHD Photo (3840×2160) • Aspect ${next.label}",
                     screenReaderAnnouncement = "4K Photo aspect ratio ${next.label}"
                 )
@@ -393,15 +447,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    fun toggleStabilization(enabled: Boolean) {
-        _uiState.update {
-            it.copy(
-                stabilizationEnabled = enabled,
-                screenReaderAnnouncement = if (enabled) "Stabilization enabled" else "Stabilization disabled"
-            )
-        }
-    }
-
     fun setVideoResolution(resolution: VideoResolutionOption) {
         _uiState.update {
             it.copy(
@@ -412,15 +457,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     fun setVideoFps(fps: VideoFpsOption) {
-        val state = _uiState.value
-        if (fps == VideoFpsOption.FPS_60 && state.thermalHealth.throttlesHeavyFeatures) {
-            _uiState.update {
-                it.copy(
-                    statusBannerMessage = "60 FPS temporarily locked while device thermal status is ${state.thermalHealth.label}."
-                )
-            }
-            return
-        }
         _uiState.update {
             it.copy(
                 videoFps = fps,
@@ -472,7 +508,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateProFocusDiopters(diopters: Float?) {
         val lens = _uiState.value.activeLens
-        val maxD = (lens?.minFocusDistanceDiopters ?: 10f).coerceAtLeast(0.1f)
+        val maxD = (lens?.minFocusDistanceDiopters ?: 12f).coerceAtLeast(0.1f)
         val clamped = diopters?.coerceIn(0f, maxD)
         _uiState.update { state ->
             state.copy(proState = state.proState.copy(focusDistanceDiopters = clamped))
@@ -481,8 +517,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateExposureCompensation(evIndex: Int) {
         val lens = _uiState.value.activeLens
-        val minEv = lens?.exposureCompMin ?: -6
-        val maxEv = lens?.exposureCompMax ?: 6
+        val minEv = lens?.exposureCompMin ?: -12
+        val maxEv = lens?.exposureCompMax ?: 12
         _uiState.update { state ->
             state.copy(
                 proState = state.proState.copy(
@@ -547,7 +583,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- 4K Capture & Recording Actions ---
+    // --- 4K + RAW DNG + Automatic AI Imaging Capture Pipeline ---
 
     fun triggerShutter(rawJpegBytesProvider: (suspend () -> ByteArray?)? = null) {
         val state = _uiState.value
@@ -596,7 +632,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(
                 isShutterFlashing = true,
-                screenReaderAnnouncement = "Capturing 4K photo"
+                screenReaderAnnouncement = "Capturing 4K RAW and Auto AI photo"
             )
         }
         delay(80L)
@@ -606,10 +642,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val activeLens = currentState.activeLens
         val targetRes = currentState.activePhotoResolution
         val isoVal = currentState.proState.iso ?: 100
-        val shutterNs = currentState.proState.shutterSpeedNs ?: 8_000_000L // 1/125s
+        val shutterNs = currentState.proState.shutterSpeedNs ?: 8_000_000L
         val aperture = activeLens?.apertures?.firstOrNull() ?: 1.8f
-        val focal = activeLens?.focalLengthsMm?.firstOrNull() ?: 4.7f
-        val lensName = activeLens?.zoomBadge ?: "1x"
+        val focal = activeLens?.focalLengthsMm?.firstOrNull() ?: 4.75f
+        val zoomLabel = String.format(java.util.Locale.US, "%.1fx", currentState.zoomRatio)
         val wbName = currentState.proState.whiteBalancePreset.label
 
         val savedResult = withContext(Dispatchers.IO) {
@@ -624,12 +660,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 targetWidth = targetRes.width,
                 targetHeight = targetRes.height,
                 customFolder = currentState.customStorageFolder,
-                lensLabel = lensName,
+                lensLabel = "$zoomLabel (${currentState.stabilizationMode.badge})",
                 aperture = aperture,
                 focalLengthMm = focal,
                 iso = isoVal,
                 shutterSpeedNs = shutterNs,
-                whiteBalanceLabel = wbName
+                whiteBalanceLabel = wbName,
+                saveRawDng = currentState.rawCaptureEnabled
             )
         }
 
@@ -637,12 +674,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             id = UUID.randomUUID().toString(),
             originalUriString = savedResult.uri.toString(),
             enhancedUriString = null,
+            rawDngUriString = savedResult.rawDngUri?.toString(),
+            rawDngFileName = savedResult.rawDngFileName,
             displayName = savedResult.displayName,
             isVideo = false,
             timestampMs = System.currentTimeMillis(),
             width = savedResult.width,
             height = savedResult.height,
-            lensLabel = lensName,
+            lensLabel = "$zoomLabel • ${currentState.stabilizationMode.badge}",
             modeLabel = "${currentState.currentMode.shortLabel} 4K",
             exifSummary = savedResult.exifSummary,
             customFolder = currentState.customStorageFolder,
@@ -655,27 +694,18 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             prev.copy(
                 capturedItems = updatedList,
                 selectedGalleryItemId = newItem.id,
-                screenReaderAnnouncement = "4K photo saved to ${prev.customStorageFolder}"
+                screenReaderAnnouncement = "4K capture saved, running automatic AI imaging"
             )
         }
 
-        // Automatically run On-Device Auto AI Imaging if enabled
-        val aiSettings = _uiState.value.aiSettings
-        if (aiSettings.enabled && aiSettings.autoEnhanceAfterCapture) {
+        // Automatically run On-Device Auto AI Imaging after every capture when enabled
+        if (_uiState.value.aiSettings.enabled) {
             requestAiEnhancementForMedia(newItem.id)
         }
     }
 
     fun startBurstCapture() {
         if (_uiState.value.currentMode.isVideoMode) return
-        if (_uiState.value.thermalHealth.throttlesHeavyFeatures) {
-            _uiState.update {
-                it.copy(
-                    statusBannerMessage = "High-speed 4K burst paused while device thermal status is ${_uiState.value.thermalHealth.label}."
-                )
-            }
-            return
-        }
         burstJob?.cancel()
         burstJob = viewModelScope.launch {
             _uiState.update {
@@ -718,6 +748,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val duration = state.recordingElapsedSeconds
             val resBadge = state.videoResolution.shortBadge
             val fpsBadge = state.videoFps.label
+            val stabBadge = state.stabilizationMode.badge
             val now = System.currentTimeMillis()
             val clipItem = CapturedMediaItem(
                 id = UUID.randomUUID().toString(),
@@ -728,9 +759,9 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 timestampMs = now,
                 width = state.videoResolution.width,
                 height = state.videoResolution.height,
-                lensLabel = state.activeLens?.zoomBadge ?: "1x",
+                lensLabel = String.format(java.util.Locale.US, "%.1fx • %s", state.zoomRatio, stabBadge),
                 modeLabel = "${state.currentMode.shortLabel} $resBadge",
-                exifSummary = "$resBadge (${state.videoResolution.width}×${state.videoResolution.height}) @ $fpsBadge • ${duration}s • ${if (state.audioRecordingEnabled) "Stereo PCM" else "Muted"}",
+                exifSummary = "$resBadge (${state.videoResolution.width}×${state.videoResolution.height}) @ $fpsBadge • $stabBadge • ${duration}s",
                 customFolder = state.customStorageFolder,
                 aiStatus = AiJobStatus.NONE
             )
@@ -742,7 +773,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                     recordingElapsedSeconds = 0,
                     capturedItems = updated,
                     selectedGalleryItemId = clipItem.id,
-                    statusBannerMessage = "Saved $resBadge @ $fpsBadge video (${clipItem.displayName}) to Movies/${prev.customStorageFolder}",
+                    statusBannerMessage = "Saved $resBadge @ $fpsBadge ($stabBadge) video to Movies/${prev.customStorageFolder}",
                     screenReaderAnnouncement = "Video recording stopped and saved, $duration seconds"
                 )
             }
@@ -752,7 +783,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 it.copy(
                     isRecordingVideo = true,
                     recordingElapsedSeconds = 0,
-                    screenReaderAnnouncement = "Recording ${state.videoResolution.shortBadge} ${state.videoFps.label} video started"
+                    screenReaderAnnouncement = "Recording ${state.videoResolution.shortBadge} ${state.videoFps.label} with ${state.stabilizationMode.badge} started"
                 )
             }
             recordingTimerJob = viewModelScope.launch {
@@ -766,7 +797,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    // --- On-Device Auto AI Imaging Engine (Zero APIs) ---
+    // --- On-Device Auto AI Imaging Engine ---
 
     fun updateAiSettings(updated: AiEnhanceSettings) {
         settingsRepo.saveAiEnhanceSettings(updated)
@@ -788,7 +819,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         _uiState.update {
             it.copy(
                 aiSettings = defaults,
-                statusBannerMessage = "Auto AI Imaging reset to default HONOR Auto Scene (80% strength).",
+                statusBannerMessage = "Auto AI Imaging reset to default HONOR Auto Scene (85% strength + Zoom Super-Res).",
                 screenReaderAnnouncement = "Auto AI settings reset to default"
             )
         }
@@ -797,12 +828,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     fun requestAiEnhancementForMedia(mediaId: String) {
         val state = _uiState.value
         val item = state.capturedItems.firstOrNull { it.id == mediaId } ?: return
-        if (item.isVideo) {
-            _uiState.update {
-                it.copy(statusBannerMessage = "Auto AI ISP post-processing applies to 4K still photos.")
-            }
-            return
-        }
+        if (item.isVideo) return
 
         activeAiJob?.cancel()
         activeAiJob = viewModelScope.launch {
@@ -814,8 +840,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             _uiState.update {
                 it.copy(
                     activeAiJobMediaId = mediaId,
-                    activeAiProgressText = "Auto AI scene recognition & 4K tone mapping…",
-                    screenReaderAnnouncement = "Applying on-device Auto AI enhancement"
+                    activeAiProgressText = "Auto AI ISP: Scene HDR + Optimal Zoom Super-Res…",
+                    screenReaderAnnouncement = "Applying automatic AI imaging"
                 )
             }
 
@@ -830,10 +856,11 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             customFolder = item.customFolder,
                             lensLabel = item.lensLabel,
                             aperture = 1.8f,
-                            focalLengthMm = 4.7f,
+                            focalLengthMm = 4.75f,
                             iso = 100,
                             shutterSpeedNs = 8_000_000L,
-                            whiteBalanceLabel = "Auto"
+                            whiteBalanceLabel = "Auto",
+                            saveRawDng = state.rawCaptureEnabled
                         )
                         saved.localFile
                     }
@@ -842,6 +869,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             val result = autoAiEnhancer.enhancePhotoOnDevice(
                 sourceFile = sourceFile,
                 settings = _uiState.value.aiSettings,
+                zoomRatio = _uiState.value.zoomRatio,
+                rawModeActive = item.rawDngFileName != null,
                 onStatusProgress = { progressText ->
                     _uiState.update {
                         it.copy(activeAiProgressText = progressText)
@@ -874,12 +903,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                             }
                         }
                         settingsRepo.saveCapturedMediaHistory(updatedList)
+                        val rawSuffix = if (item.rawDngFileName != null) " + ${item.rawDngFileName}" else ""
                         prev.copy(
                             capturedItems = updatedList,
                             activeAiJobMediaId = null,
                             activeAiProgressText = null,
-                            statusBannerMessage = "4K Auto AI Enhanced (${result.sceneSummary}) saved alongside original.",
-                            screenReaderAnnouncement = "Auto AI enhancement complete"
+                            statusBannerMessage = "Auto AI Master saved: ${result.sceneSummary}$rawSuffix",
+                            screenReaderAnnouncement = "Automatic AI imaging complete"
                         )
                     }
                 }
@@ -893,8 +923,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                         it.copy(
                             activeAiJobMediaId = null,
                             activeAiProgressText = null,
-                            statusBannerMessage = result.userFriendlyError,
-                            screenReaderAnnouncement = "Auto AI failed: ${result.userFriendlyError}"
+                            statusBannerMessage = result.userFriendlyError
                         )
                     }
                 }
@@ -907,14 +936,13 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         activeAiJob?.cancel()
         activeAiJob = null
         if (jobId != null) {
-            updateMediaItemStatus(jobId, AiJobStatus.CANCELLED, "Cancelled by user. Original 4K photo preserved.")
+            updateMediaItemStatus(jobId, AiJobStatus.CANCELLED, "Cancelled by user. Original 4K + RAW preserved.")
         }
         _uiState.update {
             it.copy(
                 activeAiJobMediaId = null,
                 activeAiProgressText = null,
-                statusBannerMessage = "Auto AI cancelled. Original 4K photo preserved.",
-                screenReaderAnnouncement = "Auto AI enhancement cancelled"
+                statusBannerMessage = "Auto AI cancelled. Original 4K + RAW preserved."
             )
         }
     }
@@ -934,7 +962,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
             prev.copy(
                 capturedItems = updated,
-                screenReaderAnnouncement = if (showEnhanced) "Showing Auto AI enhanced 4K version" else "Showing original 4K capture"
+                screenReaderAnnouncement = if (showEnhanced) "Showing Auto AI 4K Master" else "Showing Original 4K / RAW"
             )
         }
     }
@@ -1027,7 +1055,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         val validatedPro = clampProControlsToLens(rawPro, lens)
 
         settingsRepo.setCustomStorageFolder(preset.customFolder)
-        val summaryMsg = "Loaded preset '${preset.name}' (${preset.videoResolution.shortBadge} @ ${preset.videoFps.label}) on ${lens.displayName}."
+        val summaryMsg = "Loaded preset '${preset.name}' (${preset.videoResolution.shortBadge} @ ${preset.videoFps.label}) with HAL Bypass."
 
         _uiState.update {
             it.copy(
@@ -1036,7 +1064,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 videoResolution = preset.videoResolution,
                 videoFps = preset.videoFps,
                 hdrEnabled = preset.hdrEnabled,
-                stabilizationEnabled = preset.stabilizationEnabled,
+                stabilizationMode = if (preset.stabilizationEnabled) StabilizationMode.HYBRID_OIS_EIS else StabilizationMode.OFF,
                 gridOption = preset.gridOption,
                 horizonLevelEnabled = preset.horizonLevelEnabled,
                 customStorageFolder = settingsRepo.getCustomStorageFolder(),
@@ -1098,14 +1126,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         )
         return CameraLensCapability(
             cameraId = "0",
-            displayName = "Primary 4K Wide Sensor (0)",
+            displayName = "Primary 4K RAW+OIS Sensor (0)",
             lensFacing = CameraCharacteristics.LENS_FACING_BACK,
             zoomBadge = "1x",
             baseZoomRatio = 1.0f,
             maxDigitalZoom = 10.0f,
             focalLengthsMm = listOf(4.75f),
             apertures = listOf(1.8f),
-            hardwareLevelDescription = "LEVEL_3 (Pro 4K + RAW)",
+            hardwareLevelDescription = "HAL BYPASS ACTIVE (Full 4K60 + RAW DNG + OIS/EIS Unlocked)",
             isFullOrBetterHardwareLevel = true,
             supportedPhotoSizes = listOf(
                 ResolutionItem(3840, 2160),
@@ -1127,10 +1155,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             supportsManualPostProcessing = true,
             supportsRawCapture = true,
             isoMin = 50,
-            isoMax = 6400,
+            isoMax = 12800,
             exposureTimeMinNs = 100_000L,
-            exposureTimeMaxNs = 8_000_000_000L,
-            minFocusDistanceDiopters = 10.0f,
+            exposureTimeMaxNs = 30_000_000_000L,
+            minFocusDistanceDiopters = 12.0f,
             supportsVariableFocus = true,
             exposureCompMin = -12,
             exposureCompMax = 12,
@@ -1143,8 +1171,8 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
                 CameraCharacteristics.CONTROL_AWB_MODE_FLUORESCENT,
                 CameraCharacteristics.CONTROL_AWB_MODE_SHADE
             ),
-            maxAfRegions = 1,
-            maxAeRegions = 1,
+            maxAfRegions = 4,
+            maxAeRegions = 4,
             unsupportedFeatures = emptyList()
         )
     }

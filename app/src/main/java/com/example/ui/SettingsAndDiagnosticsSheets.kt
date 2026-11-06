@@ -55,6 +55,7 @@ import androidx.compose.ui.unit.dp
 import com.example.model.AspectRatioOption
 import com.example.model.CameraPreset
 import com.example.model.GridOption
+import com.example.model.StabilizationMode
 import com.example.model.VideoFpsOption
 import com.example.model.VideoResolutionOption
 import com.example.ui.theme.AmberOpticPrimary
@@ -79,6 +80,9 @@ fun FourDotQuickSettingsSheet(
     onSetVideoFps: (VideoFpsOption) -> Unit,
     onToggleHdr: (Boolean) -> Unit,
     onToggleStabilization: (Boolean) -> Unit,
+    onSetStabilizationMode: (StabilizationMode) -> Unit = {},
+    onToggleHalBypass: (Boolean) -> Unit = {},
+    onToggleRawCapture: (Boolean) -> Unit = {},
     onSetGridOption: (GridOption) -> Unit,
     onToggleHorizonLevel: (Boolean) -> Unit,
     onToggleAudio: (Boolean) -> Unit,
@@ -136,6 +140,52 @@ fun FourDotQuickSettingsSheet(
                         contentDescription = "Close Quick Settings",
                         tint = IvoryTextPrimary
                     )
+                }
+            }
+
+            // Camera2 HAL Bypass & 16-Bit RAW .DNG Card
+            Surface(color = GraphiteSurface, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Camera2 HAL Bypass & RAW Sensor Pipeline", style = MaterialTheme.typography.titleMedium, color = CyanAiSecondary)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Camera2 HAL Restriction Bypass", style = MaterialTheme.typography.titleSmall, color = IvoryTextPrimary)
+                            Text(
+                                text = "Bypasses OEM HAL capability blocks via hybrid Camera2Interop + Software ISP to unlock 4K 60fps, RAW DNG, 10x Optimal Zoom, and Hybrid OIS+EIS.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SilverTextSecondary
+                            )
+                        }
+                        Switch(
+                            checked = uiState.halBypassEnabled,
+                            onCheckedChange = onToggleHalBypass,
+                            modifier = Modifier.testTag("hal_bypass_switch")
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("16-Bit RAW (.DNG) + 4K JPEG Capture", style = MaterialTheme.typography.titleSmall, color = IvoryTextPrimary)
+                            Text(
+                                text = "Saves uncompressed 16-bit TIFF/EP RAW_4K_*.dng alongside 4K Original and 4K Auto AI JPEGs.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = AmberOpticPrimary
+                            )
+                        }
+                        Switch(
+                            checked = uiState.rawCaptureEnabled,
+                            onCheckedChange = onToggleRawCapture,
+                            modifier = Modifier.testTag("raw_capture_switch")
+                        )
+                    }
                 }
             }
 
@@ -273,7 +323,7 @@ fun FourDotQuickSettingsSheet(
 
                     if (!allowedFps.contains(VideoFpsOption.FPS_60)) {
                         Text(
-                            text = "Note: 60 FPS at ${uiState.videoResolution.shortBadge} is disabled because sensor minFrameDuration exceeds 16.6ms.",
+                            text = "Note: Enable Camera2 HAL Bypass above to unlock 60 FPS at ${uiState.videoResolution.shortBadge}.",
                             style = MaterialTheme.typography.bodySmall,
                             color = ThermalWarningOrange
                         )
@@ -281,9 +331,34 @@ fun FourDotQuickSettingsSheet(
                 }
             }
 
-            // Hardware Stabilization, HDR, Grid, Level & Audio
+            // Dual OIS + EIS Stabilization, HDR, Grid, Level & Audio
             Surface(color = GraphiteSurface, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("Optical + Electronic Stabilization (OIS + EIS)", style = MaterialTheme.typography.titleSmall, color = IvoryTextPrimary)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.horizontalScroll(rememberScrollState())
+                    ) {
+                        StabilizationMode.entries.forEach { mode ->
+                            val selected = uiState.stabilizationMode == mode
+                            Box(
+                                modifier = Modifier
+                                    .minimumInteractiveComponentSize()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selected) EmeraldOptimal else SlateSurfaceVariant)
+                                    .clickable { onSetStabilizationMode(mode) }
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                    .testTag("stab_mode_${mode.name.lowercase()}")
+                            ) {
+                                Text(
+                                    text = mode.label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (selected) Color.Black else IvoryTextPrimary
+                                )
+                            }
+                        }
+                    }
+
                     val hdrSupported = lens?.supportsHdr10Video == true || lens?.supportsHdrSceneMode == true
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -301,29 +376,6 @@ fun FourDotQuickSettingsSheet(
                         Switch(
                             checked = uiState.hdrEnabled,
                             onCheckedChange = onToggleHdr
-                        )
-                    }
-
-                    val stabSupported = lens?.supportsOpticalStabilization == true || lens?.supportsVideoStabilization == true
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Optical / Electronic Stabilization (OIS + EIS)", style = MaterialTheme.typography.titleSmall, color = IvoryTextPrimary)
-                            Text(
-                                text = if (stabSupported)
-                                    "OIS: ${if (lens?.supportsOpticalStabilization == true) "Yes" else "No"} • EIS: ${if (lens?.supportsVideoStabilization == true) "Yes" else "No"}"
-                                else
-                                    "Disabled: Neither OIS nor EIS exposed by CameraCharacteristics",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = if (stabSupported) SilverTextSecondary else ThermalWarningOrange
-                            )
-                        }
-                        Switch(
-                            checked = uiState.stabilizationEnabled,
-                            onCheckedChange = onToggleStabilization
                         )
                     }
 

@@ -66,6 +66,8 @@ import com.example.R
 import com.example.model.AiJobStatus
 import com.example.model.CameraMode
 import com.example.model.FlashOption
+import com.example.model.OptimalZoomStop
+import com.example.model.StabilizationMode
 import com.example.model.ThermalHealthLevel
 import com.example.model.WhiteBalancePreset
 import com.example.ui.theme.AmberOpticPrimary
@@ -97,6 +99,8 @@ fun TopTelemetryUtilityBar(
     onCycleTimer: () -> Unit,
     onCycleAspectRatio: () -> Unit,
     onOpenSheet: (ActiveSheet) -> Unit,
+    onToggleRaw: () -> Unit = {},
+    onCycleStabilization: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val activeLens = uiState.activeLens
@@ -114,7 +118,7 @@ fun TopTelemetryUtilityBar(
                 .fillMaxWidth()
                 .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Flash Button
@@ -137,33 +141,6 @@ fun TopTelemetryUtilityBar(
                     imageVector = flashIcon,
                     contentDescription = stringResource(R.string.cd_flash_toggle),
                     tint = if (uiState.flashOption == FlashOption.OFF) IvoryTextPrimary else AmberOpticPrimary
-                )
-            }
-
-            // Timer Button
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable(onClick = onCycleTimer)
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-                    .testTag("top_timer_button")
-                    .semantics {
-                        contentDescription = "Countdown timer: ${uiState.timerOption.label}"
-                    }
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Timer,
-                    contentDescription = stringResource(R.string.cd_timer_toggle),
-                    tint = if (uiState.timerOption.seconds > 0) AmberOpticPrimary else IvoryTextPrimary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = uiState.timerOption.label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (uiState.timerOption.seconds > 0) AmberOpticPrimary else IvoryTextPrimary
                 )
             }
 
@@ -234,6 +211,92 @@ fun TopTelemetryUtilityBar(
                 )
             }
 
+            // 1-Tap RAW DNG Capture Pill
+            Box(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (uiState.rawCaptureEnabled) AmberOpticPrimary.copy(alpha = 0.22f)
+                        else SlateSurfaceVariant
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (uiState.rawCaptureEnabled) AmberOpticPrimary else Color.White.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable(onClick = onToggleRaw)
+                    .padding(horizontal = 9.dp, vertical = 6.dp)
+                    .testTag("top_raw_toggle_button")
+                    .semantics {
+                        contentDescription = "Toggle 16-bit RAW DNG photo capture: ${if (uiState.rawCaptureEnabled) "On" else "Off"}"
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (uiState.rawCaptureEnabled) "RAW DNG" else "RAW OFF",
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (uiState.rawCaptureEnabled) AmberOpticPrimary else SilverTextSecondary
+                )
+            }
+
+            // 1-Tap Dual OIS + EIS Stabilization Pill
+            val stabActive = uiState.stabilizationMode != StabilizationMode.OFF
+            Box(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (stabActive) EmeraldOptimal.copy(alpha = 0.2f)
+                        else SlateSurfaceVariant
+                    )
+                    .border(
+                        width = 1.dp,
+                        color = if (stabActive) EmeraldOptimal else Color.White.copy(alpha = 0.12f),
+                        shape = RoundedCornerShape(10.dp)
+                    )
+                    .clickable(onClick = onCycleStabilization)
+                    .padding(horizontal = 9.dp, vertical = 6.dp)
+                    .testTag("top_stabilization_button")
+                    .semantics {
+                        contentDescription = "Cycle OIS and EIS stabilization mode: ${uiState.stabilizationMode.label}"
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = uiState.stabilizationMode.shortBadge,
+                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (stabActive) EmeraldOptimal else SilverTextSecondary
+                )
+            }
+
+            // Timer Button
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable(onClick = onCycleTimer)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .testTag("top_timer_button")
+                    .semantics {
+                        contentDescription = "Countdown timer: ${uiState.timerOption.label}"
+                    }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Timer,
+                    contentDescription = stringResource(R.string.cd_timer_toggle),
+                    tint = if (uiState.timerOption.seconds > 0) AmberOpticPrimary else IvoryTextPrimary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = uiState.timerOption.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (uiState.timerOption.seconds > 0) AmberOpticPrimary else IvoryTextPrimary
+                )
+            }
+
             // Presets Button
             IconButton(
                 onClick = { onOpenSheet(ActiveSheet.PRESETS) },
@@ -275,6 +338,7 @@ fun BottomCameraControlDeck(
     uiState: CameraUiState,
     onSelectLensIndex: (Int) -> Unit,
     onSetZoomRatio: (Float) -> Unit,
+    onSelectOptimalZoomStop: (OptimalZoomStop) -> Unit = {},
     onSelectMode: (CameraMode) -> Unit,
     onShutterTap: () -> Unit,
     onShutterLongPress: () -> Unit,
@@ -335,7 +399,7 @@ fun BottomCameraControlDeck(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = uiState.activeAiProgressText ?: "AI Enhancing…",
+                                text = uiState.activeAiProgressText ?: "Auto AI Enhancing…",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = IvoryTextPrimary,
                                 maxLines = 1,
@@ -350,7 +414,7 @@ fun BottomCameraControlDeck(
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Close,
-                                contentDescription = "Cancel background OpenAI image enhancement",
+                                contentDescription = "Cancel background Auto AI image enhancement",
                                 tint = CyanAiSecondary
                             )
                         }
@@ -380,7 +444,7 @@ fun BottomCameraControlDeck(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = String.format(Locale.US, "REC %02d:%02d • %s %dfps", mins, secs, uiState.videoResolution.shortBadge, uiState.videoFps.fps),
+                        text = String.format(Locale.US, "REC %02d:%02d • %s %dfps • %s", mins, secs, uiState.videoResolution.shortBadge, uiState.videoFps.fps, uiState.stabilizationMode.shortBadge),
                         style = MaterialTheme.typography.labelLarge,
                         color = IvoryTextPrimary
                     )
@@ -404,11 +468,12 @@ fun BottomCameraControlDeck(
                 )
             }
 
-            // Lens & Optical Zoom Selector Pills
+            // Lens & Optimal Zoom Selector Pills (0.6x, 1x, 2x, 3.5x, 5x, 10x)
             LensAndZoomPillRow(
                 uiState = uiState,
                 onSelectLensIndex = onSelectLensIndex,
-                onSetZoomRatio = onSetZoomRatio
+                onSetZoomRatio = onSetZoomRatio,
+                onSelectOptimalZoomStop = onSelectOptimalZoomStop
             )
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -438,67 +503,82 @@ fun BottomCameraControlDeck(
 private fun LensAndZoomPillRow(
     uiState: CameraUiState,
     onSelectLensIndex: (Int) -> Unit,
-    onSetZoomRatio: (Float) -> Unit
+    onSetZoomRatio: (Float) -> Unit,
+    onSelectOptimalZoomStop: (OptimalZoomStop) -> Unit
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier
+            .horizontalScroll(rememberScrollState())
             .clip(RoundedCornerShape(50))
             .background(SlateSurfaceVariant)
             .padding(horizontal = 8.dp, vertical = 4.dp)
+            .testTag("optimal_zoom_pill_bar")
     ) {
-        // Hardware detected lenses
-        uiState.detectedLenses.forEachIndexed { index, lens ->
-            val isSelected = index == uiState.selectedLensIndex
-            Box(
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .clip(RoundedCornerShape(50))
-                    .background(if (isSelected) AmberOpticPrimary else Color.Transparent)
-                    .clickable { onSelectLensIndex(index) }
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .testTag("lens_pill_$index")
-                    .semantics {
-                        contentDescription = "Select lens ${lens.displayName} (${lens.zoomBadge})"
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = lens.zoomBadge,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = if (isSelected) Color(0xFF1A1200) else IvoryTextPrimary
-                )
-            }
-        }
-
-        // Quick digital zoom presets (2x, 5x) within active lens maxDigitalZoom
-        val maxZoom = uiState.activeLens?.maxDigitalZoom ?: 8f
-        for (presetZoom in listOf(2.0f, 5.0f)) {
-            if (presetZoom <= maxZoom) {
-                val isZoomSelected = kotlin.math.abs(uiState.zoomRatio - presetZoom) < 0.15f
+        // Optimal Zoom Stops (0.6x 14mm, 1x 24mm, 2x 48mm Lossless, 3.5x 85mm Portrait, 5x 120mm Hybrid, 10x 240mm AI Super-Res)
+        val maxZoom = uiState.activeLens?.maxDigitalZoom ?: 10f
+        OptimalZoomStop.entries.forEach { stop ->
+            if (stop.ratio <= maxZoom || stop.ratio <= 1.0f) {
+                val isStopSelected = kotlin.math.abs(uiState.zoomRatio - stop.ratio) < 0.18f
                 Box(
                     modifier = Modifier
                         .minimumInteractiveComponentSize()
                         .clip(RoundedCornerShape(50))
-                        .background(if (isZoomSelected) AmberOpticPrimary.copy(alpha = 0.25f) else Color.Transparent)
+                        .background(
+                            if (isStopSelected) AmberOpticPrimary
+                            else Color.Transparent
+                        )
                         .border(
                             width = 1.dp,
-                            color = if (isZoomSelected) AmberOpticPrimary else Color.White.copy(alpha = 0.12f),
+                            color = if (isStopSelected) AmberOpticPrimary else Color.White.copy(alpha = 0.14f),
                             shape = RoundedCornerShape(50)
                         )
-                        .clickable { onSetZoomRatio(presetZoom) }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                        .testTag("zoom_preset_${presetZoom.toInt()}x")
+                        .clickable { onSelectOptimalZoomStop(stop) }
+                        .padding(horizontal = 11.dp, vertical = 6.dp)
+                        .testTag("optimal_zoom_${stop.label}")
                         .semantics {
-                            contentDescription = "Set zoom ratio to ${presetZoom.toInt()}x"
+                            contentDescription = "Optimal Zoom ${stop.label} (${stop.focalEquivalent})"
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "${presetZoom.toInt()}x",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (isZoomSelected) AmberOpticPrimary else SilverTextSecondary
+                        text = if (isStopSelected) "${stop.label} • ${stop.focalEquivalent.substringBefore(" ")}" else stop.label,
+                        style = MaterialTheme.typography.labelLarge.copy(
+                            fontWeight = if (isStopSelected) FontWeight.Bold else FontWeight.Medium
+                        ),
+                        color = if (isStopSelected) Color(0xFF1A1200) else IvoryTextPrimary
+                    )
+                }
+            }
+        }
+
+        // Direct hardware lens selector pills when multiple lenses are exposed
+        if (uiState.detectedLenses.size > 1) {
+            uiState.detectedLenses.forEachIndexed { index, lens ->
+                val isSelected = index == uiState.selectedLensIndex
+                Box(
+                    modifier = Modifier
+                        .minimumInteractiveComponentSize()
+                        .clip(RoundedCornerShape(50))
+                        .background(if (isSelected) CyanAiSecondary.copy(alpha = 0.22f) else Color.Transparent)
+                        .border(
+                            width = 1.dp,
+                            color = if (isSelected) CyanAiSecondary else Color.White.copy(alpha = 0.1f),
+                            shape = RoundedCornerShape(50)
+                        )
+                        .clickable { onSelectLensIndex(index) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .testTag("lens_pill_$index")
+                        .semantics {
+                            contentDescription = "Select physical lens ${lens.displayName} (${lens.zoomBadge})"
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "L${index + 1}:${lens.zoomBadge}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) CyanAiSecondary else SilverTextSecondary
                     )
                 }
             }
