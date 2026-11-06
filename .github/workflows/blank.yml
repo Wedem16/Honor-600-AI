@@ -1,4 +1,4 @@
-name: Build Honor 600 2.0 Cam APK
+name: Build Lumina 600 Camera APK
 
 on:
   push:
