@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Lumina 600 Camera</string>
+    <string name="cd_shutter_photo">Capture 4K photo. Long press for burst capture.</string>
+    <string name="cd_shutter_video_start">Start 4K video recording</string>
+    <string name="cd_shutter_video_stop">Stop video recording</string>
+    <string name="cd_flip_camera">Switch between rear and front camera lenses</string>
+    <string name="cd_open_gallery">Open captured 4K photos and Auto AI comparison gallery</string>
+    <string name="cd_quick_settings">Open four-dot quick settings and 4K resolution controls</string>
+    <string name="cd_flash_toggle">Cycle flash mode</string>
+    <string name="cd_timer_toggle">Cycle countdown timer</string>
+    <string name="cd_aspect_ratio">Toggle 4K resolution and frame rate (60fps / 30fps)</string>
+    <string name="cd_ai_enhance_settings">Toggle On-Device Auto AI Imaging and scene profiles</string>
+    <string name="cd_presets_sheet">Open camera presets manager</string>
+    <string name="cd_hardware_inspector">Open HONOR 600 hardware capabilities and test checklist</string>
+</resources>

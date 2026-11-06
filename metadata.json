@@ -1,0 +1,11 @@
+{
+  "name": "Lumina 600 Camera",
+  "description": "HONOR 600 Pro Camera with built-in On-Device Auto AI Imaging, 4K UHD Photo capture, 4K 60fps/30fps Video recording, and live Pro monitoring tools.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
